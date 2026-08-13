@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Pengawasan LJK — OJK Kalimantan Selatan 2026</title>
+  <meta name="description" content="Dashboard Monitoring dan Analitik Pengawasan LJK OJK Provinsi Kalimantan Selatan 2026">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="stylesheet" href="assets/style.css?v=3">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <p class="loading-text">Memuat data dari Google Sheets...</p>
+    <p class="loading-sub">Mohon tunggu sebentar</p>
+  </div>
+
+  <div class="app-layout">
+
+    <!-- ══════════════════════════════════════
+         SIDEBAR
+         ══════════════════════════════════════ -->
+    <aside class="sidebar glass-card">
+
+      <!-- Brand -->
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-words animated-brand">
+          <span class="sidebar-brand-main">DASHBOARD</span>
+          <span class="sidebar-brand-sub">PENGAWASAN LJK</span>
+          <span class="sidebar-brand-org">OJK Kalimantan Selatan</span>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Navigation -->
+      <nav class="sidebar-nav">
+        <button class="nav-item active" id="navMonitoring" onclick="showPage('monitoring')">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="3" width="4" height="18"></rect><rect x="10" y="8" width="4" height="13"></rect><rect x="2" y="13" width="4" height="8"></rect></svg></span>
+          <span class="nav-label">Dashboard Monitoring</span>
+        </button>
+        <button class="nav-item" id="navAnalitik" onclick="showPage('analitik')">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg></span>
+          <span class="nav-label">Dashboard Analitik</span>
+        </button>
+        <button class="nav-item" id="navKelola" onclick="showPage('kelola')">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span>
+          <span class="nav-label">Kelola Data</span>
+        </button>
+
+        <div class="sidebar-divider"></div>
+
+        <button class="nav-item nav-item-add" id="navTambah" onclick="openFormModal()">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></span>
+          <span class="nav-label">Tambah Kegiatan</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+
+      <!-- Sync Footer -->
+      <div class="sidebar-footer">
+        <button id="btnSync" class="sync-btn" onclick="syncData()">
+          <span id="syncBtnIcon" class="sync-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></span>
+          <span id="syncBtnText">Sync</span>
+        </button>
+        <p id="syncStatus" class="sync-status">Terakhir Sync: —</p>
+      </div>
+
+    </aside>
+
+    <!-- ══════════════════════════════════════
+         MAIN CONTENT
+         ══════════════════════════════════════ -->
+    <main class="main-content">
+
+      <!-- ════════════════════════════════════════════════════════
+           HALAMAN 1 — DASHBOARD MONITORING
+           ════════════════════════════════════════════════════════ -->
+      <div id="page-monitoring" class="page">
+
+        <!-- Page Header + Filters -->
+        <div class="page-header glass-card animate-in" style="animation-delay:0.05s">
+          <div class="page-title-block">
+            <h1 class="page-title">Dashboard Monitoring</h1>
+            <p class="page-subtitle">Monitoring Kegiatan Pengawasan LJK</p>
+          </div>
+          <div class="export-actions no-print">
+            <button class="btn-export" onclick="window.print()" title="Cetak atau simpan sebagai PDF">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+              Cetak / PDF
+            </button>
+            <button class="btn-export" onclick="downloadPageImage('monitoring')" title="Unduh halaman sebagai gambar PNG">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Unduh Gambar
+            </button>
+          </div>
+          <div class="page-filters">
+            <div class="filter-group">
+              <label>Bulan</label>
+              <select id="m-filterBulan"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Supervisor</label>
+              <select id="m-filterSupervisor"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Pegawai</label>
+              <select id="m-filterPegawai"><option value="">Semua</option></select>
+            </div>
+            <button class="btn-reset" onclick="resetFilters('monitoring')" title="Reset semua filter Monitoring">↺ Reset</button>
+          </div>
+        </div>
+
+        <!-- Metrics Row -->
+        <div class="metrics-grid animate-in" style="animation-delay:0.1s">
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#C00000;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">TOTAL KEGIATAN</span>
+              <span class="metric-value" id="m-valTotal">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#22c55e;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">SELESAI</span>
+              <span class="metric-value" id="m-valSelesai">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#f59e0b;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">ON PROGRESS</span>
+              <span class="metric-value" id="m-valProgress">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#3b82f6;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">BELUM MULAI</span>
+              <span class="metric-value" id="m-valBelum">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#ef4444;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">OVERDUE</span>
+              <span class="metric-value" id="m-valOverdue">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card completion-card">
+            <div class="metric-content">
+              <span class="metric-label">PERSENTASE<br>PENYELESAIAN</span>
+            </div>
+            <div class="completion-circle">
+              <canvas id="m-chartCompletion" width="80" height="80"></canvas>
+              <div class="completion-text" id="m-valCompletion">0%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabel Kegiatan Overdue -->
+        <div class="chart-box glass-card animate-in" style="animation-delay:0.15s">
+          <div class="table-section-header">
+            <h3>Kegiatan Overdue <span id="m-overdueCount" class="count-badge badge-red">0</span></h3>
+          </div>
+          <div class="table-wrapper" id="wrapOverdue">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width:40px">No</th>
+                  <th>Nama Kegiatan</th>
+                  <th>Pegawai</th>
+                  <th>Supervisor</th>
+                  <th style="width:110px">Deadline</th>
+                  <th style="width:90px">Terlambat</th>
+                  <th style="width:76px">Status</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyOverdue"></tbody>
+            </table>
+          </div>
+          <div id="showMoreOverdue" class="show-more-row" style="display:none"></div>
+        </div>
+
+        <!-- Tabel Kegiatan Belum Mulai -->
+        <div class="chart-box glass-card animate-in" style="animation-delay:0.2s">
+          <div class="table-section-header">
+            <h3>Kegiatan Belum Mulai <span id="m-belumCount" class="count-badge badge-blue">0</span></h3>
+          </div>
+          <div class="table-wrapper" id="wrapBelum">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width:40px">No</th>
+                  <th>Nama Kegiatan</th>
+                  <th>Pegawai</th>
+                  <th>Supervisor</th>
+                  <th style="width:110px">Deadline</th>
+                  <th style="width:90px">Sisa Waktu</th>
+                  <th style="width:90px">Status</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyBelumMulai"></tbody>
+            </table>
+          </div>
+          <div id="showMoreBelum" class="show-more-row" style="display:none"></div>
+        </div>
+
+        <!-- Timeline Kegiatan (Gantt Harian) -->
+        <div class="chart-box glass-card animate-in" style="animation-delay:0.25s">
+          <h3>TIMELINE KEGIATAN</h3>
+          <div id="ganttMonitoring" class="gantt-container"></div>
+        </div>
+
+      </div><!-- /page-monitoring -->
+
+
+      <!-- ════════════════════════════════════════════════════════
+           HALAMAN 2 — DASHBOARD ANALITIK
+           ════════════════════════════════════════════════════════ -->
+      <div id="page-analitik" class="page" style="display:none">
+
+        <!-- Page Header + Filters -->
+        <div class="page-header glass-card animate-in" style="animation-delay:0.05s">
+          <div class="page-title-block">
+            <h1 class="page-title">Dashboard Analitik</h1>
+            <p class="page-subtitle">Analisis Kinerja Kegiatan Pengawasan LJK</p>
+          </div>
+          <div class="export-actions no-print">
+            <button class="btn-export" onclick="window.print()" title="Cetak atau simpan sebagai PDF">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+              Cetak / PDF
+            </button>
+            <button class="btn-export" onclick="downloadPageImage('analitik')" title="Unduh halaman sebagai gambar PNG">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Unduh Gambar
+            </button>
+          </div>
+          <div class="page-filters">
+            <div class="filter-group">
+              <label>Bulan</label>
+              <select id="a-filterBulan"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Status Kegiatan</label>
+              <select id="a-filterStatus"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Jenis Kegiatan</label>
+              <select id="a-filterJenisKegiatan"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Kabupaten/Kota</label>
+              <select id="a-filterKotaKab"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Supervisor</label>
+              <select id="a-filterSupervisor"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Pegawai</label>
+              <select id="a-filterPegawai"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Bidang</label>
+              <select id="a-filterBidang"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Jenis LJK</label>
+              <select id="a-filterJenisLJK"><option value="">Semua</option></select>
+            </div>
+            <button class="btn-reset" onclick="resetFilters('analitik')" title="Reset semua filter Analitik">↺ Reset</button>
+          </div>
+        </div>
+
+        <!-- Metrics Row -->
+        <div class="metrics-grid animate-in" style="animation-delay:0.1s">
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#C00000;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">TOTAL KEGIATAN</span>
+              <span class="metric-value" id="a-valTotal">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#22c55e;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">SELESAI</span>
+              <span class="metric-value" id="a-valSelesai">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#f59e0b;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">ON PROGRESS</span>
+              <span class="metric-value" id="a-valProgress">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#3b82f6;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">BELUM MULAI</span>
+              <span class="metric-value" id="a-valBelum">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card">
+            <div class="metric-icon" style="background:#ef4444;color:white;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg></div>
+            <div class="metric-content">
+              <span class="metric-label">OVERDUE</span>
+              <span class="metric-value" id="a-valOverdue">0</span>
+              <span class="metric-unit">Kegiatan</span>
+            </div>
+          </div>
+          <div class="metric-card glass-card completion-card">
+            <div class="metric-content">
+              <span class="metric-label">PERSENTASE<br>PENYELESAIAN</span>
+            </div>
+            <div class="completion-circle">
+              <canvas id="a-chartCompletion" width="80" height="80"></canvas>
+              <div class="completion-text" id="a-valCompletion">0%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Timeline Kegiatan (Gantt Harian) -->
+        <div class="chart-box glass-card animate-in" style="animation-delay:0.15s">
+          <h3>TIMELINE KEGIATAN</h3>
+          <div id="ganttAnalitik" class="gantt-container"></div>
+        </div>
+
+        <!-- Row: Grafik Status per Supervisor + per Pegawai -->
+        <div class="charts-row r2 animate-in" style="animation-delay:0.2s">
+          <div class="chart-box glass-card">
+            <h3>GRAFIK STATUS PER SUPERVISOR</h3>
+            <div class="chart-wrapper"><canvas id="chartSupervisor"></canvas></div>
+          </div>
+          <div class="chart-box glass-card">
+            <h3>GRAFIK STATUS PER PEGAWAI</h3>
+            <div class="chart-wrapper"><canvas id="chartAnggota"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Row: Trend per Bulan + Status Kegiatan + Progress per Kuartal -->
+        <div class="charts-row r1 animate-in" style="animation-delay:0.25s">
+          <div class="chart-box glass-card c-trend">
+            <h3>TREND KEGIATAN PER BULAN</h3>
+            <div class="chart-wrapper"><canvas id="chartTrend"></canvas></div>
+          </div>
+          <div class="chart-box glass-card c-status">
+            <h3>STATUS KEGIATAN</h3>
+            <div class="chart-wrapper"><canvas id="chartStatus"></canvas></div>
+            <div class="status-note" id="statusNote">Terdapat 0 kegiatan overdue</div>
+          </div>
+          <div class="chart-box glass-card c-kuartal">
+            <h3>PROGRESS KEGIATAN PER KUARTAL</h3>
+            <div class="chart-wrapper"><canvas id="chartKuartal"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Row: Jenis Kegiatan + Bidang + Jenis LJK -->
+        <div class="charts-row r3 animate-in" style="animation-delay:0.3s">
+          <div class="chart-box glass-card">
+            <h3>JENIS KEGIATAN</h3>
+            <div class="chart-wrapper"><canvas id="chartJenisKegiatan"></canvas></div>
+          </div>
+          <div class="chart-box glass-card">
+            <h3>BIDANG</h3>
+            <div class="chart-wrapper"><canvas id="chartBidang"></canvas></div>
+          </div>
+          <div class="chart-box glass-card">
+            <h3>JENIS LJK</h3>
+            <div class="chart-wrapper"><canvas id="chartJenisLJK"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Row: Kegiatan per Kab/Kota + Top 10 PUJK -->
+        <div class="charts-row r4 animate-in" style="animation-delay:0.35s">
+          <div class="chart-box glass-card c-kota">
+            <h3>KEGIATAN PER KABUPATEN / KOTA</h3>
+            <div class="chart-wrapper"><canvas id="chartKota"></canvas></div>
+          </div>
+          <div class="chart-box glass-card c-top10">
+            <h3>TOP 10 PUJK (OBJEK PENGAWASAN)</h3>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Nama PUJK</th>
+                    <th>Jenis LJK</th>
+                    <th>Bidang</th>
+                    <th>Jumlah</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyTop10"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /page-analitik -->
+
+
+      <!-- ════════════════════════════════════════════════════════
+           HALAMAN 3 — KELOLA DATA
+           ════════════════════════════════════════════════════════ -->
+      <div id="page-kelola" class="page" style="display:none">
+
+        <!-- Page Header -->
+        <div class="page-header glass-card animate-in" style="animation-delay:0.05s">
+          <div class="page-title-block">
+            <h1 class="page-title">Kelola Data</h1>
+            <p class="page-subtitle">Kelola Semua Kegiatan Pengawasan LJK</p>
+          </div>
+        </div>
+
+        <!-- Toolbar: Search + Filters -->
+        <div class="kelola-toolbar glass-card animate-in" style="animation-delay:0.1s">
+          <div class="kelola-search-wrap">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="k-search" class="kelola-search" placeholder="Cari nama kegiatan atau PUJK...">
+          </div>
+          <div class="kelola-filters">
+            <div class="filter-group">
+              <label>Bulan</label>
+              <select id="k-filterBulan"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Kuartal</label>
+              <select id="k-filterKuartal"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Bidang</label>
+              <select id="k-filterBidang"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Jenis LJK</label>
+              <select id="k-filterJenisLJK"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Supervisor</label>
+              <select id="k-filterSupervisor"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Status</label>
+              <select id="k-filterStatus"><option value="">Semua</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Kota/Kab</label>
+              <select id="k-filterKotaKab"><option value="">Semua</option></select>
+            </div>
+            <button class="btn-reset" onclick="resetFilters('kelola')" title="Reset semua filter">↺ Reset</button>
+          </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="chart-box glass-card animate-in" style="animation-delay:0.15s">
+          <div class="table-section-header">
+            <h3>SEMUA KEGIATAN <span id="k-totalCount" class="count-badge badge-red">0</span></h3>
+          </div>
+          <div class="table-wrapper kelola-table-wrapper">
+            <table class="data-table" id="kelolaTable">
+              <thead>
+                <tr>
+                  <th style="width:40px">No</th>
+                  <th>Nama Kegiatan</th>
+                  <th>Nama PUJK</th>
+                  <th>Kota/Kab</th>
+                  <th>Supervisor</th>
+                  <th class="sortable-th" onclick="toggleKelolaSort()" id="k-thTanggal" style="width:140px;cursor:pointer" title="Klik untuk urutkan">Tanggal ↕</th>
+                  <th style="width:130px">Status</th>
+                  <th style="width:56px">Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyKelola"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div><!-- /page-kelola -->
+
+
+      <!-- Footer (inside main-content, scrolls with content) -->
+      <footer class="footer animate-in" style="animation-delay:0.4s">
+        <span>Catatan: Data bersumber dari database schedule pengawasan offsite (Data dapat berubah sewaktu-waktu)</span>
+        <span>Dashboard dibuat menggunakan HTML, CSS, JS</span>
+      </footer>
+
+    </main><!-- /main-content -->
+
+  </div><!-- /app-layout -->
+
+  <!-- ══════════════════════════════════════
+       MODAL: FORM TAMBAH KEGIATAN
+       ══════════════════════════════════════ -->
+  <div id="formModal" class="modal-overlay" style="display:none">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <h2><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Tambah Kegiatan Baru</h2>
+        <button class="modal-close" onclick="closeFormModal()">&times;</button>
+      </div>
+      <form id="formKegiatan" onsubmit="submitKegiatan(event)">
+        <div class="form-grid">
+
+          <div class="form-group form-col-2">
+            <label for="f-namaKegiatan">Nama Bank / Kegiatan Pengawasan <span class="req">*</span></label>
+            <input type="text" id="f-namaKegiatan" required placeholder="Contoh: Pemeriksaan Umum PT BPR ...">
+          </div>
+
+          <div class="form-group">
+            <label for="f-namaPUJK">Nama PUJK</label>
+            <input type="text" id="f-namaPUJK" list="dl-pujk" placeholder="Nama PUJK">
+            <datalist id="dl-pujk"></datalist>
+          </div>
+
+          <div class="form-group">
+            <label for="f-kotaKab">Kota/Kab</label>
+            <input type="text" id="f-kotaKab" list="dl-kota" placeholder="Kab. Banjar">
+            <datalist id="dl-kota"></datalist>
+          </div>
+
+          <div class="form-group">
+            <label for="f-bidang">Bidang</label>
+            <select id="f-bidang">
+              <option value="">— Pilih —</option>
+              <option>PBKN</option>
+              <option>PVML</option>
+              <option>PPDP</option>
+              <option>Lainnya</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="f-jenisLJK">Jenis LJK</label>
+            <select id="f-jenisLJK">
+              <option value="">— Pilih —</option>
+              <option>BPR</option>
+              <option>BUK</option>
+              <option>BPRS</option>
+              <option>Dana Pensiun</option>
+              <option>Perusahaan Penjaminan</option>
+              <option>Perusahaan Modal Ventura</option>
+              <option>Lainnya</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="f-jenisKegiatan">Jenis Kegiatan</label>
+            <select id="f-jenisKegiatan">
+              <option value="">— Pilih —</option>
+              <option>Pemeriksaan Umum</option>
+              <option>Prudential Meeting</option>
+              <option>Penyusunan LHP</option>
+              <option>KYBFI</option>
+              <option>Pengerjaan TKS</option>
+              <option>Penyusunan RBBR</option>
+              <option>Evaluasi Kinerja</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="f-tanggalMulai">Tanggal Mulai <span class="req">*</span></label>
+            <input type="date" id="f-tanggalMulai" required>
+          </div>
+
+          <div class="form-group">
+            <label for="f-tanggalSelesai">Tanggal Selesai</label>
+            <input type="date" id="f-tanggalSelesai">
+          </div>
+
+          <div class="form-group">
+            <label for="f-supervisor">Supervisor</label>
+            <select id="f-supervisor">
+              <option value="">— Pilih —</option>
+              <option>Kirbani</option>
+              <option>Satrio Aji Nugroho</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="f-statusKegiatan">Status Kegiatan</label>
+            <select id="f-statusKegiatan">
+              <option value="Belum Mulai">Belum Mulai</option>
+              <option value="On Progress">On Progress</option>
+              <option value="Selesai">Selesai</option>
+            </select>
+          </div>
+
+          <div class="form-divider"></div>
+
+          <div class="form-group">
+            <label for="f-anggota1">Anggota 1</label>
+            <input type="text" id="f-anggota1" list="dl-anggota" placeholder="Nama anggota">
+          </div>
+          <div class="form-group">
+            <label for="f-anggota2">Anggota 2</label>
+            <input type="text" id="f-anggota2" list="dl-anggota" placeholder="Nama anggota">
+          </div>
+          <div class="form-group">
+            <label for="f-anggota3">Anggota 3</label>
+            <input type="text" id="f-anggota3" list="dl-anggota" placeholder="Nama anggota">
+          </div>
+          <div class="form-group">
+            <label for="f-anggota4">Anggota 4</label>
+            <input type="text" id="f-anggota4" list="dl-anggota" placeholder="Nama anggota">
+          </div>
+          <datalist id="dl-anggota"></datalist>
+
+          <div class="form-divider"></div>
+
+          <div class="form-group form-col-2">
+            <label for="f-namaPenginput">Nama Penginput <span class="req">*</span></label>
+            <input type="text" id="f-namaPenginput" required placeholder="Nama kamu">
+          </div>
+
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn-cancel" onclick="closeFormModal()">Batal</button>
+          <button type="submit" class="btn-submit" id="btnSubmitKegiatan">
+            <span id="submitBtnText"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Simpan Kegiatan</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       MODAL: KONFIRMASI HAPUS KEGIATAN
+       ══════════════════════════════════════ -->
+  <div id="deleteModal" class="modal-overlay" style="display:none">
+    <div class="modal-content glass-card" style="max-width:480px">
+      <div class="modal-header">
+        <h2><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> Hapus Kegiatan</h2>
+        <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
+      </div>
+      <div style="margin-bottom:20px">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Yakin ingin menghapus kegiatan ini?</p>
+        <p id="deleteModalName" style="font-size:14px;font-weight:700;color:var(--text-main);padding:12px 16px;background:rgba(220,38,38,0.05);border-radius:10px;border:1px solid rgba(220,38,38,0.1);"></p>
+        <p style="font-size:11.5px;color:#dc2626;margin-top:12px;font-weight:600;">⚠️ Data akan dihapus permanen dari spreadsheet dan tidak bisa dikembalikan.</p>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-cancel" onclick="closeDeleteModal()">Batal</button>
+        <button type="button" class="btn-danger" id="btnConfirmDelete" onclick="executeDelete()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          Hapus
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="assets/script.js?v=14"></script>
+</body>
+</html>
