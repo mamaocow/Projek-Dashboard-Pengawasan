@@ -180,8 +180,8 @@ body {
 
 /* ── SIMAWAS Shimmer Effect ── */
 @keyframes shimmerSlide {
-  0%   { background-position: -200% center; }
-  100% { background-position: 200% center; }
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
 }
 
 .sidebar-brand-main {
@@ -190,23 +190,23 @@ body {
   letter-spacing: 2.5px;
   line-height: 1.15;
   background: linear-gradient(
-    105deg,
-    var(--maroon)     0%,
-    #e11d48           20%,
-    #fbbf24           38%,
-    #fff7ed           48%,
-    #fbbf24           58%,
-    #e11d48           75%,
-    var(--maroon)     100%
+    110deg,
+    var(--maroon) 0%,
+    var(--maroon) 35%,
+    #fbbf24 48%,
+    #ffffff 50%,
+    #fbbf24 52%,
+    var(--maroon) 65%,
+    var(--maroon) 100%
   );
-  background-size: 250% auto;
+  background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   color: transparent;
   animation:
     brandSlideIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards,
-    shimmerSlide 3.5s linear 0.8s infinite;
+    shimmerSlide 8s linear 0.8s infinite;
   opacity: 0;
   transform: translateY(10px);
   filter: drop-shadow(0 0 8px rgba(169, 16, 36, 0.25));
