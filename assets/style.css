@@ -192,11 +192,11 @@ body {
   background: linear-gradient(
     110deg,
     var(--maroon) 0%,
-    var(--maroon) 35%,
-    #fbbf24 48%,
-    #ffffff 50%,
-    #fbbf24 52%,
-    var(--maroon) 65%,
+    var(--maroon) 40%,
+    #c42138 47%,
+    #e78896 50%,
+    #c42138 53%,
+    var(--maroon) 60%,
     var(--maroon) 100%
   );
   background-size: 200% auto;
@@ -206,10 +206,9 @@ body {
   color: transparent;
   animation:
     brandSlideIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards,
-    shimmerSlide 8s linear 0.8s infinite;
+    shimmerSlide 7s linear 0.8s infinite;
   opacity: 0;
   transform: translateY(10px);
-  filter: drop-shadow(0 0 8px rgba(169, 16, 36, 0.25));
 }
 
 .sidebar-brand-sub {
