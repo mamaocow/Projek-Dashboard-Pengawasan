@@ -1,0 +1,12 @@
+{
+  "name": "dashboard-pengawasan-ojk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard Pengawasan LJK — OJK Kalimantan Selatan 2026",
+  "scripts": {
+    "start": "node dev-server.js"
+  },
+  "dependencies": {
+    "googleapis": "^140.0.0"
+  }
+}

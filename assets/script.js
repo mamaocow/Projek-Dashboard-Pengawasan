@@ -1,232 +1,795 @@
 /**
  * Dashboard Pengawasan LJK — OJK Kalsel 2026
- * Real-time data from Google Sheets via server endpoint
+ * Revisi: 2-halaman (Monitoring + Analitik) + sidebar navigasi
  */
 
-let DATA = null;
-let charts = {};
-
-const BULAN_ORDER = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+// ─── Constants ──────────────────────────────────────────────────────────────
+const BULAN_ORDER  = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+const BULAN_SHORT  = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
 const KUARTAL_ORDER = ['Q1','Q2','Q3','Q4'];
-const BULAN_SHORT   = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+const DASHBOARD_YEAR = 2026;
+
+// Single source of truth for Jenis Kegiatan options
+const JENIS_KEGIATAN_OPTIONS = [
+  'Pemeriksaan Umum',
+  'Prudential Meeting',
+  'Penyusunan LHP',
+  'KYBFI',
+  'Pengerjaan TKS',
+  'Penyusunan RBBR',
+  'Evaluasi Kinerja',
+  'Penyusunan LAB',
+];
 
 const COLOR_MAROON = '#A91024';
 const COLOR_GREEN  = '#22c55e';
 const COLOR_YELLOW = '#f59e0b';
 const COLOR_BLUE   = '#3b82f6';
 const COLOR_RED    = '#ef4444';
+const COLOR_PURPLE = '#8b5cf6';
 
-// ═══════════════════════════════════════════════════════════
-// LOAD & SYNC DATA FROM SERVER (which fetches Google Sheets)
-// ═══════════════════════════════════════════════════════════
+// ─── State ───────────────────────────────────────────────────────────────────
+let DATA = null;
+let charts = {};
 let isInitialized = false;
+let currentPage = 'monitoring';
+let analitikInitialized = false;
 let autoRefreshTimer = null;
 
-async function loadData(isManual = false) {
-  const btnSync = document.getElementById('btnRefresh');
-  if (isManual && btnSync) {
-    btnSync.classList.add('spinning');
-  }
-
-  if (!isInitialized) {
-    showLoading(true);
-  }
-
-  const failsafe = setTimeout(() => {
-    showLoading(false);
-    if (btnSync) btnSync.classList.remove('spinning');
-    console.warn("Failsafe triggered: Loading overlay hidden automatically after 15s");
-  }, 15000);
-
-  try {
-    const res = await fetch('data/data.json?t=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    DATA = await res.json();
-    clearTimeout(failsafe);
-    showLoading(false);
-    if (btnSync) btnSync.classList.remove('spinning');
-
-    if (!isInitialized) {
-      isInitialized = true;
-      initDashboard();
-      // Auto refresh every 30 seconds
-      if (!autoRefreshTimer) {
-        autoRefreshTimer = setInterval(() => {
-          loadData(false);
-        }, 30000);
-      }
-    } else {
-      // Refresh charts and filters while saving state
-      const currentFilters = saveFilterState();
-      populateFilters();
-      restoreFilterState(currentFilters);
-      updateDashboard();
-    }
-  } catch(err) {
-    clearTimeout(failsafe);
-    if (btnSync) btnSync.classList.remove('spinning');
-    console.error("Gagal load data:", err);
-    showLoading(false);
-    if (!isInitialized) {
-      showError("Gagal memuat data dari Google Sheets. Pastikan server lokal (python3 server.py) berjalan di background.");
-    }
-  }
-}
-
-function manualRefresh() {
-  loadData(true);
-}
-
-function saveFilterState() {
-  const filterIds = ['filterKuartal','filterBulan','filterSupervisor','filterStatus','filterBidang','filterJenisLJK','filterJenisKegiatan','filterKotaKab','filterAnggota'];
-  const state = {};
-  filterIds.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) state[id] = el.value;
-  });
-  return state;
-}
-
-function restoreFilterState(state) {
-  Object.keys(state).forEach(id => {
-    const el = document.getElementById(id);
-    if (el && Array.from(el.options).some(opt => opt.value === state[id])) {
-      el.value = state[id];
-    }
-  });
-}
-
+// ═══════════════════════════════════════════════════════════════════
+// LOADING & DATA
+// ═══════════════════════════════════════════════════════════════════
 function showLoading(on) {
   const el = document.getElementById('loadingOverlay');
   if (el) el.style.display = on ? 'flex' : 'none';
 }
 
 function showError(msg) {
-  const main = document.querySelector('.metrics-grid') || document.body;
-  main.insertAdjacentHTML('beforebegin', `
-    <div style="text-align:center;padding:1.5rem;background:#fee2e2;color:#991b1b;border-radius:12px;margin:1rem 0;font-weight:600;font-size:13px;">
-      ⚠️ ${msg}
-    </div>
-  `);
+  const main = document.querySelector('.main-content') || document.body;
+  const div = document.createElement('div');
+  div.style.cssText = 'text-align:center;padding:1.5rem;background:#fee2e2;color:#991b1b;border-radius:12px;margin:1rem 0;font-weight:600;font-size:13px;';
+  div.innerHTML = `⚠️ ${msg}`;
+  main.insertAdjacentElement('afterbegin', div);
 }
 
-// ═══════════════════════════════════════════════════════════
-// INIT & DASHBOARD SETUP
-// ═══════════════════════════════════════════════════════════
-function initDashboard() {
-  if (typeof ChartDataLabels !== 'undefined') {
-    Chart.register(ChartDataLabels);
+async function loadData(isManual = false) {
+  if (!isInitialized) showLoading(true);
+
+  const failsafe = setTimeout(() => {
+    showLoading(false);
+    console.warn('Failsafe: loading overlay hidden after 15s');
+  }, 15000);
+
+  try {
+    const res = await fetch('/api/data?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    DATA = await res.json();
+    clearTimeout(failsafe);
+    showLoading(false);
+
+    if (!isInitialized) {
+      isInitialized = true;
+      initDashboard();
+      if (!autoRefreshTimer) {
+        autoRefreshTimer = setInterval(() => loadData(false), 30000);
+      }
+    } else {
+      // Auto-refresh: preserve filter state, repopulate, update
+      const savedState = saveFilterState();
+      populateFilters();
+      restoreFilterState(savedState);
+      updateDashboard();
+    }
+  } catch (err) {
+    clearTimeout(failsafe);
+    showLoading(false);
+    console.error('Gagal load data:', err);
+    if (!isInitialized) {
+      showError('Gagal memuat data. Pastikan file data/data.json tersedia.');
+    }
   }
-  Chart.defaults.font.family = "'Inter', sans-serif";
-  Chart.defaults.color = '#6e6e73';
+}
+
+// ─── Manual Sync (tombol Sync di sidebar) ────────────────────────────────────
+async function syncData() {
+  const btn = document.getElementById('btnSync');
+  const iconEl = document.getElementById('syncBtnIcon');
+  const textEl = document.getElementById('syncBtnText');
+
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.add('syncing');
+  if (iconEl) iconEl.textContent = '🔄';
+  if (textEl) textEl.textContent = 'Syncing...';
+
+  try {
+    const res = await fetch('/api/data?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    DATA = await res.json();
+
+    // Save timestamp to localStorage
+    const now = new Date();
+    localStorage.setItem('dashboardLastSync', now.toISOString());
+    updateSyncStatus(now);
+
+    // Preserve filters, refresh dashboard
+    const savedState = saveFilterState();
+    populateFilters();
+    restoreFilterState(savedState);
+    updateDashboard();
+
+    // Success feedback
+    btn.classList.remove('syncing');
+    btn.classList.add('success');
+    if (iconEl) iconEl.textContent = '✅';
+    if (textEl) textEl.textContent = 'Berhasil!';
+    setTimeout(() => {
+      btn.classList.remove('success');
+      if (iconEl) iconEl.textContent = '🔄';
+      if (textEl) textEl.textContent = 'Sync';
+      btn.disabled = false;
+    }, 2200);
+
+  } catch (err) {
+    console.error('Sync gagal:', err);
+    btn.classList.remove('syncing');
+    btn.classList.add('error');
+    if (iconEl) iconEl.textContent = '❌';
+    if (textEl) textEl.textContent = 'Gagal';
+    setTimeout(() => {
+      btn.classList.remove('error');
+      if (iconEl) iconEl.textContent = '🔄';
+      if (textEl) textEl.textContent = 'Sync';
+      btn.disabled = false;
+    }, 2200);
+  }
+}
+
+// ─── Sync Status Display ──────────────────────────────────────────────────────
+function updateSyncStatus(date) {
+  const el = document.getElementById('syncStatus');
+  if (!el || !date) return;
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    const dateStr = d.toLocaleDateString('id-ID', {
+      day: 'numeric', month: 'short', year: 'numeric',
+      timeZone: 'Asia/Makassar' // WITA
+    });
+    const timeStr = d.toLocaleTimeString('id-ID', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZone: 'Asia/Makassar'
+    });
+    el.textContent = `Terakhir Sync: ${dateStr}, ${timeStr} WITA`;
+  } catch (e) {
+    el.textContent = 'Terakhir Sync: —';
+  }
+}
+
+function loadSyncStatusFromStorage() {
+  const stored = localStorage.getItem('dashboardLastSync');
+  if (stored) {
+    updateSyncStatus(new Date(stored));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE ROUTING
+// ═══════════════════════════════════════════════════════════════════
+function showPage(page) {
+  currentPage = page;
+
+  const monEl = document.getElementById('page-monitoring');
+  const anaEl = document.getElementById('page-analitik');
+  const kelEl = document.getElementById('page-kelola');
+  if (monEl) monEl.style.display = page === 'monitoring' ? 'flex' : 'none';
+  if (anaEl) anaEl.style.display = page === 'analitik'   ? 'flex' : 'none';
+  if (kelEl) kelEl.style.display = page === 'kelola'     ? 'flex' : 'none';
+
+  document.getElementById('navMonitoring')?.classList.toggle('active', page === 'monitoring');
+  document.getElementById('navAnalitik')?.classList.toggle('active',   page === 'analitik');
+  document.getElementById('navKelola')?.classList.toggle('active',     page === 'kelola');
+
+  if (!DATA) return;
+
+  if (page === 'monitoring') {
+    updateMonitoring();
+  } else if (page === 'analitik') {
+    analitikInitialized = true;
+    updateAnalitik();
+  } else if (page === 'kelola') {
+    updateKelolaData();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+function initDashboard() {
+  if (typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
+  
+  // ── Global Chart UX Improvements ──
+  Chart.defaults.font.family = "'Inter', -apple-system, sans-serif";
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = '#6b7280';
+  Chart.defaults.maintainAspectRatio = false;
+  Chart.defaults.animation.duration = 750;
+  Chart.defaults.animation.easing = 'easeOutQuart';
+  
+  // Premium Tooltips
+  if (Chart.defaults.plugins.tooltip) {
+    Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(255, 255, 255, 0.95)';
+    Chart.defaults.plugins.tooltip.titleColor = '#111827';
+    Chart.defaults.plugins.tooltip.bodyColor = '#374151';
+    Chart.defaults.plugins.tooltip.titleFont = { size: 13, weight: 'bold', family: "'Inter', sans-serif" };
+    Chart.defaults.plugins.tooltip.bodyFont = { size: 12, family: "'Inter', sans-serif" };
+    Chart.defaults.plugins.tooltip.padding = 12;
+    Chart.defaults.plugins.tooltip.cornerRadius = 8;
+    Chart.defaults.plugins.tooltip.borderColor = 'rgba(0,0,0,0.08)';
+    Chart.defaults.plugins.tooltip.borderWidth = 1;
+    Chart.defaults.plugins.tooltip.boxPadding = 6;
+    Chart.defaults.plugins.tooltip.usePointStyle = true;
+  }
+
+  // Cleaner Data Labels
   if (Chart.defaults.plugins.datalabels) {
     Chart.defaults.plugins.datalabels.color = '#fff';
-    Chart.defaults.plugins.datalabels.font = { size: 9, weight: 'bold' };
+    Chart.defaults.plugins.datalabels.font = { size: 10, weight: 'bold' };
+    Chart.defaults.plugins.datalabels.display = (context) => context.dataset.data[context.dataIndex] > 0;
   }
 
+  loadSyncStatusFromStorage();
+  populateJenisKegiatanDropdown();
   populateFilters();
-  updateDashboard();
+  setupFilterListeners();
+  updateMonitoring(); // Render monitoring page on load
+  // Analitik is deferred until user visits it (to avoid chart sizing issues on hidden elements)
+}
 
-  document.querySelectorAll('.filter-bar select').forEach(sel => {
-    sel.addEventListener('change', updateDashboard);
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function isOverdue(k, today) {
+  if (!today) { today = new Date(); today.setHours(0,0,0,0); }
+  return k.statusKegiatan !== 'Selesai' && !!k.tanggalSelesai && new Date(k.tanggalSelesai) < today;
+}
+
+// Populate all <select> elements that carry Jenis Kegiatan options from the single constant
+function populateJenisKegiatanDropdown() {
+  // All three Jenis Kegiatan dropdowns share one constant — form, Analitik filter, Kelola filter
+  const targets = ['f-jenisKegiatan', 'a-filterJenisKegiatan', 'k-filterJenisKegiatan'];
+  targets.forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    // Keep the first option ("— Pilih —" or "Semua") and replace the rest
+    while (sel.options.length > 1) sel.remove(1);
+    JENIS_KEGIATAN_OPTIONS.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = v;
+      sel.appendChild(o);
+    });
   });
 }
 
-function getFilteredData() {
-  const fKuartal      = document.getElementById('filterKuartal')?.value || '';
-  const fBulan        = document.getElementById('filterBulan')?.value || '';
-  const fSupervisor   = document.getElementById('filterSupervisor')?.value || '';
-  const fStatus       = document.getElementById('filterStatus')?.value || '';
-  const fBidang       = document.getElementById('filterBidang')?.value || '';
-  const fJenisLJK     = document.getElementById('filterJenisLJK')?.value || '';
-  const fJenisKeg     = document.getElementById('filterJenisKegiatan')?.value || '';
-  const fKota         = document.getElementById('filterKotaKab')?.value || '';
-  const fAnggota      = document.getElementById('filterAnggota')?.value || '';
+// ═══════════════════════════════════════════════════════════════════
+// FILTER POPULATION
+// ═══════════════════════════════════════════════════════════════════
+function populateFilters() {
+  const addOpts = (id, vals) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    while (sel.options.length > 1) sel.remove(1);
+    vals.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = v;
+      sel.appendChild(o);
+    });
+  };
 
-  return DATA.kegiatan.filter(k => {
-    if (fKuartal    && k.kuartal        !== fKuartal)    return false;
-    if (fBulan      && k.bulan          !== fBulan)      return false;
-    if (fSupervisor && k.supervisor     !== fSupervisor) return false;
-    if (fStatus     && k.statusKegiatan  !== fStatus)    return false;
-    if (fBidang     && k.bidang         !== fBidang)     return false;
-    if (fJenisLJK   && k.jenisLJK      !== fJenisLJK)   return false;
-    if (fJenisKeg   && k.jenisKegiatan  !== fJenisKeg)   return false;
-    if (fKota       && k.kotaKab        !== fKota)       return false;
-    if (fAnggota    && (!k.anggota || !k.anggota.includes(fAnggota))) return false;
-    return true;
+  const getUniq = field => [...new Set(DATA.kegiatan.map(k => k[field]).filter(Boolean))].sort();
+  const activeBulan = BULAN_ORDER.filter(b => DATA.kegiatan.some(k => k.bulan === b));
+
+  // Extract unique years from tanggalMulai
+  const yearsSet = new Set();
+  DATA.kegiatan.forEach(k => {
+    if (k.tanggalMulai) {
+      const yr = new Date(k.tanggalMulai).getFullYear();
+      if (!isNaN(yr)) yearsSet.add(yr);
+    }
   });
+  const allYears = [...yearsSet].sort((a, b) => b - a);
+
+  // Collect all unique anggota dynamically
+  const anggotaSet = new Set();
+  DATA.kegiatan.forEach(k => {
+    if (k.anggota && k.anggota.length > 0) k.anggota.forEach(a => anggotaSet.add(a));
+  });
+  const allAnggota = [...anggotaSet].sort();
+
+  // ── Monitoring filters
+  addOpts('m-filterTahun',      allYears);
+  addOpts('m-filterBulan',       activeBulan);
+  addOpts('m-filterSupervisor',  getUniq('supervisor'));
+  addOpts('m-filterPegawai',     allAnggota);
+
+  // ── Analitik filters
+  addOpts('a-filterTahun',         allYears);
+  addOpts('a-filterBulan',         activeBulan);
+  addOpts('a-filterStatus',        getUniq('statusKegiatan'));
+  // Jenis Kegiatan uses the shared constant — populated by populateJenisKegiatanDropdown()
+  addOpts('a-filterKotaKab',       getUniq('kotaKab'));
+  addOpts('a-filterSupervisor',    getUniq('supervisor'));
+  addOpts('a-filterPegawai',       allAnggota);
+  addOpts('a-filterBidang',        getUniq('bidang'));
+
+  // ── Kelola filters
+  addOpts('k-filterTahun',         allYears);
+  addOpts('k-filterBulan',         activeBulan);
+  addOpts('k-filterKuartal',       KUARTAL_ORDER);
+  addOpts('k-filterBidang',        getUniq('bidang'));
+  addOpts('k-filterSupervisor',    getUniq('supervisor'));
+  addOpts('k-filterStatus',        getUniq('statusKegiatan'));
+  addOpts('k-filterKotaKab',       getUniq('kotaKab'));
+  // Jenis Kegiatan uses the shared constant — repopulate to stay in sync
+  populateJenisKegiatanDropdown();
 }
 
-function updateDashboard() {
-  const filtered = getFilteredData();
-
-  const tglStr = DATA.metadata?.tanggalGenerate;
-  let genDate;
-  if (tglStr) {
-    // If the string has no timezone indicator (from old server.py), treat as WIB (UTC+7)
-    // If it ends with Z or +, it's already timezone-aware
-    const hasTimezone = tglStr.endsWith('Z') || tglStr.includes('+') || tglStr.includes(' UTC');
-    genDate = hasTimezone ? new Date(tglStr) : new Date(tglStr + '+07:00');
-  } else {
-    genDate = new Date();
+function setupFilterListeners() {
+  ['m-filterTahun', 'm-filterBulan', 'm-filterSupervisor', 'm-filterPegawai'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateMonitoring);
+  });
+  ['a-filterTahun', 'a-filterBulan', 'a-filterStatus', 'a-filterJenisKegiatan', 'a-filterKotaKab',
+   'a-filterSupervisor', 'a-filterPegawai', 'a-filterBidang'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateAnalitik);
+  });
+  
+  ['k-filterTahun', 'k-filterBulan', 'k-filterKuartal', 'k-filterBidang',
+   'k-filterJenisKegiatan', 'k-filterSupervisor', 'k-filterStatus', 'k-filterKotaKab'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateKelolaData);
+  });
+  
+  const searchInput = document.getElementById('k-search');
+  if (searchInput) {
+    let debounceTimer;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateKelolaData, 300);
+    });
   }
-  const dateFormatted = genDate.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric', timeZone:'Asia/Jakarta' });
-  const timeFormatted = genDate.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'Asia/Jakarta' });
-  document.getElementById('metaDate').textContent = `${dateFormatted}, ${timeFormatted} WIB`;
+}
+
+// ─── Read filter values ──────────────────────────────────────────────────────
+function getFilteredData(page) {
+  if (!DATA) return [];
+
+  if (page === 'monitoring') {
+    const fTahun      = document.getElementById('m-filterTahun')?.value      || '';
+    const fBulan      = document.getElementById('m-filterBulan')?.value     || '';
+    const fSupervisor = document.getElementById('m-filterSupervisor')?.value || '';
+    const fPegawai    = document.getElementById('m-filterPegawai')?.value    || '';
+
+    return DATA.kegiatan.filter(k => {
+      if (fTahun      && (!k.tanggalMulai || String(new Date(k.tanggalMulai).getFullYear()) !== fTahun)) return false;
+      if (fBulan      && k.bulan      !== fBulan)                                    return false;
+      if (fSupervisor && k.supervisor !== fSupervisor)                               return false;
+      if (fPegawai    && (!k.anggota  || !k.anggota.includes(fPegawai)))             return false;
+      return true;
+    });
+  } else {
+    const fTahun     = document.getElementById('a-filterTahun')?.value         || '';
+    const fBulan     = document.getElementById('a-filterBulan')?.value         || '';
+    const fStatus    = document.getElementById('a-filterStatus')?.value        || '';
+    const fJenisKeg  = document.getElementById('a-filterJenisKegiatan')?.value || '';
+    const fKota      = document.getElementById('a-filterKotaKab')?.value       || '';
+    const fSuper     = document.getElementById('a-filterSupervisor')?.value    || '';
+    const fPegawai   = document.getElementById('a-filterPegawai')?.value       || '';
+    const fBidang    = document.getElementById('a-filterBidang')?.value        || '';
+
+    return DATA.kegiatan.filter(k => {
+      if (fTahun    && (!k.tanggalMulai || String(new Date(k.tanggalMulai).getFullYear()) !== fTahun)) return false;
+      if (fBulan    && k.bulan          !== fBulan)                              return false;
+      if (fStatus   && k.statusKegiatan !== fStatus)                             return false;
+      if (fJenisKeg && k.jenisKegiatan  !== fJenisKeg)                           return false;
+      if (fKota     && k.kotaKab        !== fKota)                               return false;
+      if (fSuper    && k.supervisor     !== fSuper)                               return false;
+      if (fPegawai  && (!k.anggota     || !k.anggota.includes(fPegawai)))        return false;
+      if (fBidang   && k.bidang         !== fBidang)                             return false;
+      return true;
+    });
+  }
+}
+
+// ─── Save / Restore Filter State (for auto-refresh) ──────────────────────────
+function saveFilterState() {
+  const ids = [
+    'm-filterTahun','m-filterBulan','m-filterSupervisor','m-filterPegawai',
+    'a-filterTahun','a-filterBulan','a-filterStatus','a-filterJenisKegiatan','a-filterKotaKab',
+    'a-filterSupervisor','a-filterPegawai','a-filterBidang',
+    'k-filterTahun','k-filterBulan','k-filterKuartal','k-filterBidang',
+    'k-filterJenisKegiatan','k-filterSupervisor','k-filterStatus','k-filterKotaKab','k-search'
+  ];
+  const state = {};
+  ids.forEach(id => { const el = document.getElementById(id); if (el) state[id] = el.value; });
+  return state;
+}
+
+function restoreFilterState(state) {
+  Object.keys(state).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === 'SELECT') {
+      if ([...el.options].some(o => o.value === state[id])) el.value = state[id];
+    } else {
+      el.value = state[id];
+    }
+  });
+}
+
+// ─── Reset Filters ────────────────────────────────────────────────────────────
+function resetFilters(page) {
+  if (page === 'monitoring') {
+    ['m-filterTahun','m-filterBulan','m-filterSupervisor','m-filterPegawai'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    updateMonitoring();
+  } else if (page === 'analitik') {
+    ['a-filterTahun','a-filterBulan','a-filterStatus','a-filterJenisKegiatan','a-filterKotaKab',
+     'a-filterSupervisor','a-filterPegawai','a-filterBidang'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    updateAnalitik();
+  } else if (page === 'kelola') {
+    ['k-filterTahun','k-filterBulan','k-filterKuartal','k-filterBidang',
+     'k-filterJenisKegiatan','k-filterSupervisor','k-filterStatus','k-filterKotaKab'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    const searchEl = document.getElementById('k-search');
+    if (searchEl) searchEl.value = '';
+    updateKelolaData();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD UPDATE (called by auto-refresh & sync)
+// ═══════════════════════════════════════════════════════════════════
+function updateDashboard() {
+  updateMonitoring();
+  if (analitikInitialized) updateAnalitik();
+  if (currentPage === 'kelola') updateKelolaData();
+}
+
+// ─── Halaman 1: Monitoring ────────────────────────────────────────────────────
+function updateMonitoring() {
+  if (!DATA) return;
+  const filtered = getFilteredData('monitoring');
+  const today = new Date(); today.setHours(0,0,0,0);
 
   const total    = filtered.length;
   const selesai  = filtered.filter(k => k.statusKegiatan === 'Selesai').length;
-  const progress = filtered.filter(k => k.statusKegiatan === 'On Progress').length;
-  const belum    = filtered.filter(k => k.statusKegiatan === 'Belum Mulai').length;
-
-  const today = new Date(); today.setHours(0,0,0,0);
-  const overdue = filtered.filter(k =>
-    k.statusKegiatan === 'Belum Mulai' && k.tanggalSelesai && new Date(k.tanggalSelesai) < today
-  ).length;
-
-  document.getElementById('valTotal').textContent    = total;
-  document.getElementById('valSelesai').textContent  = selesai;
-  document.getElementById('valProgress').textContent = progress;
-  document.getElementById('valBelum').textContent    = belum;
-  document.getElementById('valOverdue').textContent  = overdue;
-
+  const progress = filtered.filter(k => k.statusKegiatan === 'On Progress' && !isOverdue(k, today)).length;
+  const belum    = filtered.filter(k => k.statusKegiatan === 'Belum Mulai' && !isOverdue(k, today)).length;
+  const overdue  = filtered.filter(k => isOverdue(k, today)).length;
   const pct = total > 0 ? Math.round((selesai / total) * 100) : 0;
-  document.getElementById('valCompletion').textContent = pct + '%';
-  document.getElementById('statusNote').textContent =
-    `Terdapat ${overdue} kegiatan overdue (melewati tanggal selesai namun belum selesai)`;
 
-  renderCompletionDonut(pct);
+  setText('m-valTotal',    total);
+  setText('m-valSelesai',  selesai);
+  setText('m-valProgress', progress);
+  setText('m-valBelum',    belum);
+  setText('m-valOverdue',  overdue);
+  setText('m-valCompletion', pct + '%');
+
+  renderCompletionDonut('m-chartCompletion', pct);
+  renderTableOverdue(filtered, today);
+  renderTableBelumMulai(filtered, today);
+
+  const bulanFilter = document.getElementById('m-filterBulan')?.value || '';
+  renderGanttDaily('ganttMonitoring', filtered, bulanFilter);
+}
+
+// ─── Halaman 2: Analitik ─────────────────────────────────────────────────────
+function updateAnalitik() {
+  if (!DATA) return;
+  const filtered = getFilteredData('analitik');
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const total    = filtered.length;
+  const selesai  = filtered.filter(k => k.statusKegiatan === 'Selesai').length;
+  const progress = filtered.filter(k => k.statusKegiatan === 'On Progress' && !isOverdue(k, today)).length;
+  const belum    = filtered.filter(k => k.statusKegiatan === 'Belum Mulai' && !isOverdue(k, today)).length;
+  const overdue  = filtered.filter(k => isOverdue(k, today)).length;
+  const pct = total > 0 ? Math.round((selesai / total) * 100) : 0;
+
+  setText('a-valTotal',    total);
+  setText('a-valSelesai',  selesai);
+  setText('a-valProgress', progress);
+  setText('a-valBelum',    belum);
+  setText('a-valOverdue',  overdue);
+  setText('a-valCompletion', pct + '%');
+
+  const statusNote = document.getElementById('statusNote');
+  if (statusNote) statusNote.textContent = `Terdapat ${overdue} kegiatan overdue (melewati tanggal selesai namun belum selesai)`;
+
+  renderCompletionDonut('a-chartCompletion', pct);
+
+  const bulanFilter = document.getElementById('a-filterBulan')?.value || '';
+  renderGanttDaily('ganttAnalitik', filtered, bulanFilter);
+
+  renderSupervisor(filtered, today);
+  renderAnggota(filtered, today);
   renderTrend(filtered);
-  renderStatus(selesai, progress, belum);
+  renderStatus(filtered);
   renderProgressKuartal(filtered);
-  renderSupervisor(filtered);
   renderHorizontalBar('chartJenisKegiatan', filtered, 'jenisKegiatan');
   renderHorizontalBar('chartBidang',        filtered, 'bidang');
-  renderHorizontalBar('chartJenisLJK',      filtered, 'jenisLJK');
   renderKota(filtered);
   renderTop10(filtered);
-  renderAnggota(filtered);
-  renderBebanAnggota(filtered);
-  renderAnggotaTable(filtered);
-  renderGantt(filtered);
+}
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
 }
 
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); charts[id] = null; }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// TABLE: KEGIATAN OVERDUE (Halaman 1)
+// ═══════════════════════════════════════════════════════════════════
+function renderTableOverdue(data, today) {
+  const PREVIEW = 5;
+  const overdue = data
+    .filter(k => isOverdue(k, today))
+    .sort((a, b) => new Date(a.tanggalSelesai) - new Date(b.tanggalSelesai)); // most overdue first
+
+  setText('m-overdueCount', overdue.length);
+
+  const rows = overdue.map((k, i) => {
+    const deadline   = new Date(k.tanggalSelesai);
+    const daysLate   = Math.floor((today - deadline) / 864e5);
+    const pegawai    = k.anggota && k.anggota.length > 0 ? k.anggota.join(', ') : '—';
+    const deadlineStr = deadline.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' });
+    const isExtra    = i >= PREVIEW;
+    return `<tr${isExtra ? ' class="extra-row" style="display:none"' : ''}>
+      <td>${i + 1}</td>
+      <td title="${escHtml(k.namaKegiatan)}">${truncate(k.namaKegiatan, 45)}</td>
+      <td>${escHtml(pegawai)}</td>
+      <td>${escHtml(k.supervisor || '—')}</td>
+      <td>${deadlineStr}</td>
+      <td style="color:#ef4444;font-weight:700;">-${daysLate} hari</td>
+      <td><span class="status-badge badge-overdue">Overdue</span></td>
+    </tr>`;
+  });
+
+  const tbody = document.getElementById('tbodyOverdue');
+  if (tbody) tbody.innerHTML = rows.join('') || `<tr><td colspan="7" style="text-align:center;padding:16px;color:#999;">Tidak ada kegiatan overdue 🎉</td></tr>`;
+
+  const showMore = document.getElementById('showMoreOverdue');
+  if (showMore) {
+    if (overdue.length > PREVIEW) {
+      showMore.style.display = 'block';
+      showMore.innerHTML = `<button class="show-more-btn" onclick="toggleExtraRows('tbodyOverdue','showMoreOverdue',${overdue.length},${PREVIEW})">Lihat semua overdue (${overdue.length}) →</button>`;
+    } else {
+      showMore.style.display = 'none';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TABLE: KEGIATAN BELUM MULAI (Halaman 1)
+// ═══════════════════════════════════════════════════════════════════
+function renderTableBelumMulai(data, today) {
+  const PREVIEW = 5;
+  const belum = data
+    .filter(k => k.statusKegiatan === 'Belum Mulai' && (!k.tanggalSelesai || new Date(k.tanggalSelesai) >= today))
+    .sort((a, b) => {
+      const da = a.tanggalSelesai ? new Date(a.tanggalSelesai) : new Date('9999-12-31');
+      const db = b.tanggalSelesai ? new Date(b.tanggalSelesai) : new Date('9999-12-31');
+      return da - db;
+    });
+
+  setText('m-belumCount', belum.length);
+
+  const rows = belum.map((k, i) => {
+    const pegawai = k.anggota && k.anggota.length > 0 ? k.anggota.join(', ') : '—';
+    let deadlineStr = '—';
+    let sisaStr     = '—';
+    let sisaStyle   = '';
+    if (k.tanggalSelesai) {
+      const deadline = new Date(k.tanggalSelesai);
+      deadlineStr = deadline.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' });
+      const sisaDays = Math.floor((deadline - today) / 864e5);
+      if (sisaDays <= 7) {
+        sisaStr = `${sisaDays} hari`;
+        sisaStyle = 'color:#f59e0b;font-weight:700;';
+      } else {
+        sisaStr = `${sisaDays} hari`;
+        sisaStyle = 'color:#22c55e;font-weight:600;';
+      }
+    }
+    const isExtra = i >= PREVIEW;
+    return `<tr${isExtra ? ' class="extra-row" style="display:none"' : ''}>
+      <td>${i + 1}</td>
+      <td title="${escHtml(k.namaKegiatan)}">${truncate(k.namaKegiatan, 45)}</td>
+      <td>${escHtml(pegawai)}</td>
+      <td>${escHtml(k.supervisor || '—')}</td>
+      <td>${deadlineStr}</td>
+      <td style="${sisaStyle}">${sisaStr}</td>
+      <td><span class="status-badge badge-belum">Belum Mulai</span></td>
+    </tr>`;
+  });
+
+  const tbody = document.getElementById('tbodyBelumMulai');
+  if (tbody) tbody.innerHTML = rows.join('') || `<tr><td colspan="7" style="text-align:center;padding:16px;color:#999;">Tidak ada kegiatan belum mulai</td></tr>`;
+
+  const showMore = document.getElementById('showMoreBelum');
+  if (showMore) {
+    if (belum.length > PREVIEW) {
+      showMore.style.display = 'block';
+      showMore.innerHTML = `<button class="show-more-btn" onclick="toggleExtraRows('tbodyBelumMulai','showMoreBelum',${belum.length},${PREVIEW})">Lihat semua belum mulai (${belum.length}) →</button>`;
+    } else {
+      showMore.style.display = 'none';
+    }
+  }
+}
+
+function toggleExtraRows(tbodyId, containerId, total, preview) {
+  const tbody = document.getElementById(tbodyId);
+  const container = document.getElementById(containerId);
+  if (!tbody || !container) return;
+  const extras = tbody.querySelectorAll('tr.extra-row');
+  const isHidden = extras[0]?.style.display === 'none';
+  extras.forEach(r => { r.style.display = isHidden ? '' : 'none'; });
+  const btn = container.querySelector('button');
+  if (btn) btn.textContent = isHidden
+    ? '↑ Tampilkan lebih sedikit'
+    : `Lihat semua (${total}) →`;
+}
+
+// ─── String helpers ───────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function truncate(str, n) {
+  return str && str.length > n ? str.substring(0, n - 1) + '…' : (str || '');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// GANTT DAILY
+// ═══════════════════════════════════════════════════════════════════
+function renderGanttDaily(containerId, data, bulanFilter) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Determine which month to display
+  const today = new Date(); today.setHours(0,0,0,0);
+  let monthIndex = today.getMonth(); // default = current month
+  if (bulanFilter && BULAN_ORDER.includes(bulanFilter)) {
+    monthIndex = BULAN_ORDER.indexOf(bulanFilter);
+  }
+
+  const YEAR = DASHBOARD_YEAR;
+  const daysInMonth = new Date(YEAR, monthIndex + 1, 0).getDate();
+  const monthName   = BULAN_ORDER[monthIndex];
+  const mStart = new Date(YEAR, monthIndex, 1);
+  const mEnd   = new Date(YEAR, monthIndex, daysInMonth);
+
+  const todayD = today.getDate();
+  const todayM = today.getMonth();
+  const todayY = today.getFullYear();
+
+  // Get status color info
+  const getStatusColor = (k) => {
+    const isOD = isOverdue(k, today);
+    if (isOD)                            return { bg: 'rgba(239,68,68,0.22)',   border: COLOR_RED    };
+    if (k.statusKegiatan === 'Selesai')  return { bg: 'rgba(34,197,94,0.22)',   border: COLOR_GREEN  };
+    if (k.statusKegiatan === 'On Progress') return { bg: 'rgba(245,158,11,0.22)', border: COLOR_YELLOW };
+    return                                        { bg: 'rgba(59,130,246,0.22)', border: COLOR_BLUE  };
+  };
+
+  // Filter activities that overlap with selected month
+  const monthData = data
+    .filter(k => {
+      if (!k.tanggalMulai) return false;
+      const s = new Date(k.tanggalMulai);
+      const e = k.tanggalSelesai ? new Date(k.tanggalSelesai) : s;
+      return s <= mEnd && e >= mStart;
+    })
+    .sort((a, b) => new Date(a.tanggalMulai) - new Date(b.tanggalMulai));
+
+  // Build column headers
+  const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => {
+    const d = i + 1;
+    const isT = d === todayD && monthIndex === todayM && YEAR === todayY;
+    return `<th class="gantt-day-th${isT ? ' today-col' : ''}">${d}</th>`;
+  }).join('');
+
+  // Build rows
+  let rowsHtml = '';
+  if (monthData.length === 0) {
+    rowsHtml = `<tr><td colspan="${daysInMonth + 2}" class="gantt-empty">Tidak ada kegiatan pada ${monthName} ${YEAR}</td></tr>`;
+  } else {
+    rowsHtml = monthData.map(k => {
+      const start = new Date(k.tanggalMulai);
+      const end   = k.tanggalSelesai ? new Date(k.tanggalSelesai) : start;
+      const sc    = getStatusColor(k);
+
+      // Effective start/end day within this month
+      const effStart = start < mStart ? 1                : start.getDate();
+      const effEnd   = end   > mEnd   ? daysInMonth      : end.getDate();
+
+      let dayCells = '';
+      for (let d = 1; d <= daysInMonth; d++) {
+        const inRange = d >= effStart && d <= effEnd;
+        const isT = d === todayD && monthIndex === todayM && YEAR === todayY;
+        const tClass = isT ? ' today-col' : '';
+        if (inRange) {
+          const isFirst = d === effStart;
+          const isLast  = d === effEnd;
+          const br = [
+            isFirst ? '4px' : '0',
+            isLast  ? '4px' : '0',
+            isLast  ? '4px' : '0',
+            isFirst ? '4px' : '0'
+          ].join(' ');
+          dayCells += `<td class="gantt-day-cell active${tClass}" style="background:${sc.bg};border-radius:${br};outline:1px solid ${sc.border}22;"></td>`;
+        } else {
+          dayCells += `<td class="gantt-day-cell${tClass}"></td>`;
+        }
+      }
+
+      const pegawai = k.anggota && k.anggota.length > 0 ? k.anggota.join(', ') : '—';
+      const tooltip = `${k.namaKegiatan}\nKasub: ${k.supervisor || '—'}\nPegawai: ${pegawai}\nStatus: ${k.statusKegiatan}`;
+
+      return `<tr>
+        <td class="gantt-name-cell" title="${escHtml(tooltip)}">${truncate(k.namaKegiatan, 38)}</td>
+        <td class="gantt-sup-cell">${escHtml(k.supervisor || '—')}</td>
+        ${dayCells}
+      </tr>`;
+    }).join('');
+  }
+
+  container.innerHTML = `
+    <div class="gantt-toolbar">
+      <span style="font-size:11px;font-weight:700;color:var(--text-main);margin-right:auto;">${monthName} ${YEAR} &nbsp;·&nbsp; ${monthData.length} kegiatan</span>
+      <div class="gantt-legend">
+        <span class="legend-item"><span class="box" style="background:${COLOR_GREEN}"></span> Selesai</span>
+        <span class="legend-item"><span class="box" style="background:${COLOR_YELLOW}"></span> On Progress</span>
+        <span class="legend-item"><span class="box" style="background:${COLOR_BLUE}"></span> Belum Mulai</span>
+        <span class="legend-item"><span class="box" style="background:${COLOR_RED}"></span> Overdue</span>
+        ${todayM === monthIndex && todayY === YEAR ? '<span class="legend-item today-marker">▼ Hari Ini</span>' : ''}
+      </div>
+    </div>
+    <div class="gantt-scroll-wrapper">
+      <table class="data-table gantt-daily-table">
+        <thead>
+          <tr>
+            <th class="gantt-name-th">Nama Kegiatan</th>
+            <th class="gantt-sup-th">Kasub</th>
+            ${dayHeaders}
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // CHARTS
-// ═══════════════════════════════════════════════════════════
-function renderCompletionDonut(pct) {
-  destroyChart('chartCompletion');
-  charts['chartCompletion'] = new Chart(document.getElementById('chartCompletion'), {
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Completion Donut ─────────────────────────────────────────────────────────
+function renderCompletionDonut(id, pct) {
+  destroyChart(id);
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  charts[id] = new Chart(canvas, {
     type: 'doughnut',
-    data: { datasets: [{ data: [pct, 100-pct], backgroundColor: [COLOR_MAROON,'#e5e7eb'], borderWidth: 0 }] },
-    options: { cutout:'75%', plugins:{ tooltip:{enabled:false}, datalabels:{display:false} }, animation:{duration:600} }
+    data: { datasets: [{ data: [pct, 100 - pct], backgroundColor: [COLOR_MAROON, '#e5e7eb'], borderWidth: 0 }] },
+    options: { cutout: '75%', plugins: { tooltip: { enabled: false }, datalabels: { display: false } }, animation: { duration: 600 } }
   });
 }
 
+// ── Trend per Bulan ───────────────────────────────────────────────────────────
 function renderTrend(data) {
   destroyChart('chartTrend');
   const counts = BULAN_ORDER.map(b => data.filter(k => k.bulan === b).length);
@@ -237,7 +800,7 @@ function renderTrend(data) {
       responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        datalabels: { anchor:'end', align:'top', color:'#1d1d1f', formatter: v => v > 0 ? v : '' }
+        datalabels: { anchor: 'end', align: 'top', color: '#1d1d1f', formatter: v => v > 0 ? v : '' }
       },
       scales: {
         y: { beginAtZero: true, suggestedMax: Math.max(...counts, 1) + 5 },
@@ -247,14 +810,26 @@ function renderTrend(data) {
   });
 }
 
-function renderStatus(selesai, progress, belum) {
+// ── Status Kegiatan (donut) ───────────────────────────────────────────────────
+function renderStatus(data) {
   destroyChart('chartStatus');
-  const total = selesai + progress + belum;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const selesai  = data.filter(k => k.statusKegiatan === 'Selesai').length;
+  const overdue  = data.filter(k => isOverdue(k, today)).length;
+  const progress = data.filter(k => k.statusKegiatan === 'On Progress' && !isOverdue(k, today)).length;
+  const belum    = data.filter(k => k.statusKegiatan === 'Belum Mulai' && !isOverdue(k, today)).length;
+  const total    = selesai + progress + belum + overdue;
+
   charts['chartStatus'] = new Chart(document.getElementById('chartStatus'), {
     type: 'doughnut',
     data: {
-      labels: ['Selesai','On Progress','Belum Mulai'],
-      datasets: [{ data:[selesai,progress,belum], backgroundColor:[COLOR_GREEN,COLOR_YELLOW,COLOR_BLUE], borderWidth:2, borderColor:'#fff' }]
+      labels: ['Selesai', 'On Progress', 'Belum Mulai', 'Overdue'],
+      datasets: [{
+        data: [selesai, progress, belum, overdue],
+        backgroundColor: [COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_RED],
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
     },
     options: {
       responsive: true, maintainAspectRatio: false, cutout: '40%',
@@ -263,59 +838,116 @@ function renderStatus(selesai, progress, belum) {
           position: 'right',
           labels: {
             boxWidth: 12, font: { size: 10 },
-            generateLabels: chart => chart.data.labels.map((l,i) => ({
-              text: l + '\n' + chart.data.datasets[0].data[i] + ' Kegiatan',
+            generateLabels: chart => chart.data.labels.map((l, i) => ({
+              text: `${l}\n${chart.data.datasets[0].data[i]} Kegiatan`,
               fillStyle: chart.data.datasets[0].backgroundColor[i],
               strokeStyle: chart.data.datasets[0].backgroundColor[i]
             }))
           }
         },
         datalabels: {
-          formatter: (val) => total > 0 && val > 0 ? Math.round((val/total)*100)+'%' : '',
-          color: '#fff', font: { weight:'bold', size:10 }
+          formatter: (val) => total > 0 && val > 0 ? Math.round((val / total) * 100) + '%' : '',
+          color: '#fff', font: { weight: 'bold', size: 10 }
         }
       }
     }
   });
 }
 
+// ── Progress per Kuartal ─────────────────────────────────────────────────────
 function renderProgressKuartal(data) {
   destroyChart('chartKuartal');
-  const counts  = KUARTAL_ORDER.map(q => data.filter(k => k.kuartal === q).length);
+  const counts   = KUARTAL_ORDER.map(q => data.filter(k => k.kuartal === q).length);
   const selesais = KUARTAL_ORDER.map(q => data.filter(k => k.kuartal === q && k.statusKegiatan === 'Selesai').length);
-  const pcts    = counts.map((c,i) => c > 0 ? Math.round((selesais[i]/c)*100) : 0);
-  const labels  = ['Q1\n(Jan-Mar)','Q2\n(Apr-Jun)','Q3\n(Jul-Sep)','Q4\n(Okt-Des)'];
+  const pcts     = counts.map((c, i) => c > 0 ? Math.round((selesais[i] / c) * 100) : 0);
+  const labels   = ['Q1\n(Jan-Mar)', 'Q2\n(Apr-Jun)', 'Q3\n(Jul-Sep)', 'Q4\n(Okt-Des)'];
 
   charts['chartKuartal'] = new Chart(document.getElementById('chartKuartal'), {
     type: 'bar',
     data: {
       labels,
       datasets: [
-        { type:'line', label:'Persentase Selesai', data:pcts, borderColor:COLOR_YELLOW, backgroundColor:COLOR_YELLOW, yAxisID:'y1',
-          datalabels:{ align:'top', anchor:'end', formatter: v=>v+'%', color:'#1d1d1f' } },
-        { type:'bar',  label:'Total Kegiatan', data:counts, backgroundColor:COLOR_MAROON, barPercentage:0.4, yAxisID:'y',
-          datalabels:{ align:'top', anchor:'end', color:'#1d1d1f', formatter: v=> v>0?v:'' } }
+        {
+          type: 'line',
+          label: 'Persentase Selesai',
+          data: pcts,
+          borderColor: COLOR_YELLOW,
+          backgroundColor: COLOR_YELLOW,
+          yAxisID: 'y1',
+          datalabels: {
+            align: function(context) {
+              const chart = context.chart;
+              if (!chart || !chart.scales.y || !chart.scales.y1) return 'top';
+              const i = context.dataIndex;
+              const countVal = counts[i];
+              if (countVal === 0) return 'top';
+              const yBar = chart.scales.y.getPixelForValue(countVal);
+              const yLine = chart.scales.y1.getPixelForValue(pcts[i]);
+              const diff = yLine - yBar;
+              if (Math.abs(diff) < 28) {
+                return diff >= -4 ? 'bottom' : 'top';
+              }
+              return 'top';
+            },
+            anchor: 'end',
+            offset: function(context) {
+              const chart = context.chart;
+              if (!chart || !chart.scales.y || !chart.scales.y1) return 4;
+              const i = context.dataIndex;
+              const countVal = counts[i];
+              if (countVal === 0) return 4;
+              const yBar = chart.scales.y.getPixelForValue(countVal);
+              const yLine = chart.scales.y1.getPixelForValue(pcts[i]);
+              const diff = yLine - yBar;
+              if (Math.abs(diff) < 28) {
+                return diff < -4 ? 14 : 8;
+              }
+              return 4;
+            },
+            formatter: v => v + '%',
+            color: '#1d1d1f'
+          }
+        },
+        {
+          type: 'bar',
+          label: 'Total Kegiatan',
+          data: counts,
+          backgroundColor: COLOR_MAROON,
+          barPercentage: 0.4,
+          yAxisID: 'y',
+          datalabels: {
+            align: 'top',
+            anchor: 'end',
+            offset: 4,
+            color: '#1d1d1f',
+            formatter: v => v > 0 ? v : ''
+          }
+        }
       ]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend:{ position:'bottom', labels:{ boxWidth:12 } } },
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12 } }
+      },
       scales: {
-        y:  { type:'linear', position:'left',  beginAtZero:true, suggestedMax: Math.max(...counts,1)+5 },
-        y1: { type:'linear', position:'right', min:0, max:120, grid:{display:false}, ticks:{ callback: v=>v+'%' } },
-        x:  { grid:{ display:false } }
+        y:  { type: 'linear', position: 'left',  beginAtZero: true, suggestedMax: Math.max(...counts, 1) + 5 },
+        y1: { type: 'linear', position: 'right', min: 0, max: 120, grid: { display: false }, ticks: { callback: v => v + '%' } },
+        x:  { grid: { display: false } }
       }
     }
   });
 }
 
-function renderSupervisor(data) {
+// ── Status per Supervisor (stacked bar) ───────────────────────────────────────
+function renderSupervisor(data, today) {
   destroyChart('chartSupervisor');
+  if (!today) { today = new Date(); today.setHours(0,0,0,0); }
   const sups = [...new Set(DATA.kegiatan.map(k => k.supervisor || 'Lainnya').filter(Boolean))].sort();
-  const ds = (status) => sups.map(s => data.filter(k => (k.supervisor||'Lainnya') === s && k.statusKegiatan === status).length);
-  const today = new Date(); today.setHours(0,0,0,0);
+  const ds = status => sups.map(s => data.filter(k => (k.supervisor || 'Lainnya') === s && k.statusKegiatan === status && !isOverdue(k, today)).length);
   const dOverdue = sups.map(s => data.filter(k =>
-    (k.supervisor||'Lainnya') === s && k.statusKegiatan === 'Belum Mulai' && k.tanggalSelesai && new Date(k.tanggalSelesai) < today
+    (k.supervisor || 'Lainnya') === s && isOverdue(k, today)
   ).length);
 
   charts['chartSupervisor'] = new Chart(document.getElementById('chartSupervisor'), {
@@ -323,122 +955,46 @@ function renderSupervisor(data) {
     data: {
       labels: sups,
       datasets: [
-        { label:'Selesai',    data: ds('Selesai'),    backgroundColor: COLOR_GREEN  },
-        { label:'On Progress',data: ds('On Progress'),backgroundColor: COLOR_YELLOW },
-        { label:'Belum Mulai',data: ds('Belum Mulai'),backgroundColor: COLOR_BLUE  },
-        { label:'Overdue',    data: dOverdue,          backgroundColor: COLOR_RED   },
+        { label: 'Selesai',     data: ds('Selesai'),     backgroundColor: COLOR_GREEN  },
+        { label: 'On Progress', data: ds('On Progress'), backgroundColor: COLOR_YELLOW },
+        { label: 'Belum Mulai', data: ds('Belum Mulai'), backgroundColor: COLOR_BLUE  },
+        { label: 'Overdue',     data: dOverdue,           backgroundColor: COLOR_RED   },
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: {
-        legend: { position:'top', labels:{ boxWidth:8, font:{size:9} } },
+        legend: { position: 'top', labels: { boxWidth: 8, font: { size: 9 } } },
         datalabels: { formatter: v => v > 0 ? v : '' }
       },
-      scales: { x:{stacked:true}, y:{stacked:true, grid:{display:false}, ticks:{autoSkip:false}} }
+      scales: { x: { stacked: true }, y: { stacked: true, grid: { display: false }, ticks: { autoSkip: false } } }
     }
   });
 }
 
-function renderHorizontalBar(id, data, field) {
-  destroyChart(id);
-  const counts = {};
-  data.forEach(k => { const v = k[field]||'Lainnya'; counts[v]=(counts[v]||0)+1; });
-  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-  const labels = sorted.map(i=>i[0]);
-  const vals   = sorted.map(i=>i[1]);
-
-  charts[id] = new Chart(document.getElementById(id), {
-    type: 'bar',
-    data: { labels, datasets:[{ data:vals, backgroundColor:COLOR_MAROON, barPercentage:0.6 }] },
-    options: {
-      responsive:true, maintainAspectRatio:false, indexAxis:'y',
-      plugins: {
-        legend:{display:false},
-        datalabels:{ anchor:'end', align:'right', color:'#1d1d1f' }
-      },
-      scales: {
-        x:{ beginAtZero:true, suggestedMax: Math.max(...vals,1)*1.2, grid:{drawBorder:false} },
-        y:{ grid:{display:false} }
-      }
-    }
-  });
-}
-
-function renderKota(data) {
-  destroyChart('chartKota');
-  const counts = {};
-  data.forEach(k => {
-    let v = k.kotaKab || 'Lainnya';
-    v = v.replace(/^(Kab\.|Kota)\s+/i, '');
-    counts[v] = (counts[v]||0)+1;
-  });
-  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-  const labels = sorted.map(i=>i[0]);
-  const vals   = sorted.map(i=>i[1]);
-
-  charts['chartKota'] = new Chart(document.getElementById('chartKota'), {
-    type: 'bar',
-    data: { labels, datasets:[{ data:vals, backgroundColor:COLOR_MAROON, barPercentage:0.5 }] },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins: {
-        legend:{display:false},
-        datalabels:{ anchor:'end', align:'top', color:'#1d1d1f' }
-      },
-      scales: {
-        y:{ beginAtZero:true, suggestedMax: Math.max(...vals,1)*1.2 },
-        x:{ grid:{display:false}, ticks:{font:{size:9}} }
-      }
-    }
-  });
-}
-
-function renderTop10(data) {
-  const pujkCount = {};
-  data.forEach(k => {
-    if (k.namaPUJK) {
-      if (!pujkCount[k.namaPUJK]) pujkCount[k.namaPUJK] = { c:0, s:k.bidang, l:k.jenisLJK };
-      pujkCount[k.namaPUJK].c++;
-    }
-  });
-  const sorted = Object.entries(pujkCount).sort((a,b)=>b[1].c-a[1].c).slice(0,10);
-  document.getElementById('tbodyTop10').innerHTML = sorted.map((item,i) => `
-    <tr>
-      <td>${i+1}</td>
-      <td>${item[0]}</td>
-      <td>${item[1].l}</td>
-      <td>${item[1].s}</td>
-      <td style="text-align:center">${item[1].c}</td>
-    </tr>
-  `).join('');
-}
-
-function renderAnggota(data) {
+// ── Grafik Status per Pegawai (stacked bar) ───────────────────────────────────
+function renderAnggota(data, today) {
   destroyChart('chartAnggota');
-  
-  // Get unique anggota list from FULL data so all pegawai always show up
+  if (!today) { today = new Date(); today.setHours(0,0,0,0); }
+
+  // Use full DATA to get all unique anggota names
   const anggotaSet = new Set();
   DATA.kegiatan.forEach(k => {
-    if (k.anggota && k.anggota.length > 0) {
-      k.anggota.forEach(a => anggotaSet.add(a));
-    }
+    if (k.anggota && k.anggota.length > 0) k.anggota.forEach(a => anggotaSet.add(a));
   });
   const angs = [...anggotaSet].sort();
-  
+
   if (angs.length === 0) {
-    document.getElementById('chartAnggota').parentElement.innerHTML = '<div style="text-align:center;margin-top:20px;color:#999;font-size:12px;">Tidak ada data anggota pada filter ini</div>';
+    const el = document.getElementById('chartAnggota');
+    if (el) el.parentElement.innerHTML = '<div style="text-align:center;margin-top:20px;color:#999;font-size:12px;">Tidak ada data pegawai</div>';
     return;
   }
 
-  // Helper to count by status
-  const ds = (status) => angs.map(a => 
-    data.filter(k => k.anggota && k.anggota.includes(a) && k.statusKegiatan === status).length
+  const ds = status => angs.map(a =>
+    data.filter(k => k.anggota && k.anggota.includes(a) && k.statusKegiatan === status && !isOverdue(k, today)).length
   );
-  
-  const today = new Date(); today.setHours(0,0,0,0);
   const dOverdue = angs.map(a => data.filter(k =>
-    k.anggota && k.anggota.includes(a) && k.statusKegiatan === 'Belum Mulai' && k.tanggalSelesai && new Date(k.tanggalSelesai) < today
+    k.anggota && k.anggota.includes(a) && isOverdue(k, today)
   ).length);
 
   charts['chartAnggota'] = new Chart(document.getElementById('chartAnggota'), {
@@ -446,145 +1002,450 @@ function renderAnggota(data) {
     data: {
       labels: angs,
       datasets: [
-        { label:'Selesai',    data: ds('Selesai'),    backgroundColor: COLOR_GREEN  },
-        { label:'On Progress',data: ds('On Progress'),backgroundColor: COLOR_YELLOW },
-        { label:'Belum Mulai',data: ds('Belum Mulai'),backgroundColor: COLOR_BLUE  },
-        { label:'Overdue',    data: dOverdue,         backgroundColor: COLOR_RED   },
+        { label: 'Selesai',     data: ds('Selesai'),     backgroundColor: COLOR_GREEN  },
+        { label: 'On Progress', data: ds('On Progress'), backgroundColor: COLOR_YELLOW },
+        { label: 'Belum Mulai', data: ds('Belum Mulai'), backgroundColor: COLOR_BLUE  },
+        { label: 'Overdue',     data: dOverdue,           backgroundColor: COLOR_RED   },
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: {
-        legend: { position:'top', labels:{ boxWidth:8, font:{size:9} } },
+        legend: { position: 'top', labels: { boxWidth: 8, font: { size: 9 } } },
         datalabels: { formatter: v => v > 0 ? v : '' }
       },
-      scales: { x:{stacked:true}, y:{stacked:true, grid:{display:false}, ticks:{autoSkip:false}} }
+      scales: { x: { stacked: true }, y: { stacked: true, grid: { display: false }, ticks: { autoSkip: false } } }
     }
   });
 }
 
-function renderBebanAnggota(data) {
-  destroyChart('chartBebanAnggota');
-  
-  // Get unique anggota list from FULL data to show all
-  const anggotaSet = new Set();
-  DATA.kegiatan.forEach(k => {
-    if (k.anggota && k.anggota.length > 0) {
-      k.anggota.forEach(a => anggotaSet.add(a));
-    }
-  });
-  const angs = [...anggotaSet].sort();
-  
-  if (angs.length === 0) {
-    document.getElementById('chartBebanAnggota').parentElement.innerHTML = '<div style="text-align:center;margin-top:20px;color:#999;font-size:12px;">Tidak ada data anggota pada filter ini</div>';
-    return;
-  }
+// ── Generic Horizontal Bar ────────────────────────────────────────────────────
+function renderHorizontalBar(id, data, field) {
+  destroyChart(id);
+  const counts = {};
+  data.forEach(k => { const v = k[field] || 'Lainnya'; counts[v] = (counts[v] || 0) + 1; });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(i => i[0]);
+  const vals   = sorted.map(i => i[1]);
 
-  // Count total tasks per anggota based on FILTERED data
-  const counts = angs.map(a => 
-    data.filter(k => k.anggota && k.anggota.includes(a)).length
-  );
-
-  charts['chartBebanAnggota'] = new Chart(document.getElementById('chartBebanAnggota'), {
+  charts[id] = new Chart(document.getElementById(id), {
     type: 'bar',
-    data: { 
-      labels: angs, 
-      datasets: [{ data: counts, backgroundColor: COLOR_MAROON, barPercentage: 0.6 }] 
-    },
+    data: { labels, datasets: [{ data: vals, backgroundColor: COLOR_MAROON, barPercentage: 0.6 }] },
     options: {
       responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: {
         legend: { display: false },
-        datalabels: { anchor: 'end', align: 'right', color: '#1d1d1f', formatter: v => v > 0 ? v : '' }
+        datalabels: { anchor: 'end', align: 'right', color: '#1d1d1f' }
       },
       scales: {
-        x: { beginAtZero: true, suggestedMax: Math.max(...counts, 1) * 1.2, grid: { drawBorder: false } },
-        y: { grid: { display: false }, ticks: { font: { size: 9 }, autoSkip: false } }
+        x: { beginAtZero: true, suggestedMax: Math.max(...vals, 1) * 1.2, grid: { drawBorder: false } },
+        y: { grid: { display: false } }
       }
     }
   });
 }
 
-function renderAnggotaTable(data) {
-  const filtered = data.filter(k => k.anggota && k.anggota.length > 0);
-  const tbody = document.getElementById('tbodyAnggota');
-  if (!tbody) return;
+// ── Kegiatan per Kab/Kota ────────────────────────────────────────────────────
+function renderKota(data) {
+  destroyChart('chartKota');
+  const counts = {};
+  data.forEach(k => {
+    let v = k.kotaKab || 'Lainnya';
+    v = v.replace(/^(Kab\.|Kota)\s+/i, '');
+    counts[v] = (counts[v] || 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(i => i[0]);
+  const vals   = sorted.map(i => i[1]);
 
-  const statusColors = {
-    'Selesai': '#dcfce7',
-    'On Progress': '#fef9c3',
-    'Belum Mulai': '#dbeafe'
-  };
-  const statusTextColors = {
-    'Selesai': '#166534',
-    'On Progress': '#854d0e',
-    'Belum Mulai': '#1e40af'
-  };
-
-  tbody.innerHTML = filtered.map((k, i) => {
-    const bg = statusColors[k.statusKegiatan] || '#f3f4f6';
-    const fg = statusTextColors[k.statusKegiatan] || '#374151';
-    return `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${k.namaKegiatan}</td>
-      <td>${k.supervisor}</td>
-      <td>${k.anggota.join(', ')}</td>
-      <td><span style="background:${bg};color:${fg};padding:3px 10px;border-radius:6px;font-size:10px;font-weight:600;white-space:nowrap;">${k.statusKegiatan}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderGantt(data) {
-  const sorted = [...data].filter(k=>k.tanggalMulai).sort((a,b)=>new Date(a.tanggalMulai)-new Date(b.tanggalMulai));
-  document.getElementById('tbodyGantt').innerHTML = sorted.map(k => {
-    const start = new Date(k.tanggalMulai);
-    const end   = k.tanggalSelesai ? new Date(k.tanggalSelesai) : start;
-    let cells = '';
-    for (let i=0; i<12; i++) {
-      const mStart = new Date(2026, i, 1);
-      const mEnd   = new Date(2026, i+1, 0);
-      if (start <= mEnd && end >= mStart) {
-        const mDays    = mEnd.getDate();
-        const startDay = new Date(Math.max(start, mStart)).getDate();
-        const endDay   = new Date(Math.min(end, mEnd)).getDate();
-        const left  = ((startDay-1)/mDays*100).toFixed(1);
-        const width = ((endDay-startDay+1)/mDays*100).toFixed(1);
-        cells += `<td class="month-cell"><div class="gantt-bar" style="left:${left}%;width:${width}%"></div></td>`;
-      } else {
-        cells += `<td class="month-cell bg-gray"></td>`;
+  charts['chartKota'] = new Chart(document.getElementById('chartKota'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: vals, backgroundColor: COLOR_MAROON, barPercentage: 0.5 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: { anchor: 'end', align: 'top', color: '#1d1d1f' }
+      },
+      scales: {
+        y: { beginAtZero: true, suggestedMax: Math.max(...vals, 1) * 1.2 },
+        x: { grid: { display: false }, ticks: { font: { size: 9 } } }
       }
     }
-    return `<tr><td>${k.namaKegiatan}</td><td>${k.supervisor}</td>${cells}</tr>`;
-  }).join('');
+  });
 }
 
-// ═══════════════════════════════════════════════════════════
-// FILTER POPULATION
-// ═══════════════════════════════════════════════════════════
-function populateFilters() {
-  const addOpts = (id, vals) => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    while (sel.options.length > 1) sel.remove(1);
-    vals.forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+// ── Top 10 PUJK ──────────────────────────────────────────────────────────────
+function renderTop10(data) {
+  const pujkCount = {};
+  data.forEach(k => {
+    if (k.namaPUJK) {
+      if (!pujkCount[k.namaPUJK]) pujkCount[k.namaPUJK] = { c: 0, b: k.bidang };
+      pujkCount[k.namaPUJK].c++;
+    }
+  });
+  const sorted = Object.entries(pujkCount).sort((a, b) => b[1].c - a[1].c).slice(0, 10);
+  const tbody = document.getElementById('tbodyTop10');
+  if (tbody) {
+    tbody.innerHTML = sorted.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${escHtml(item[0])}</td>
+        <td>${escHtml(item[1].b || '—')}</td>
+        <td style="text-align:center">${item[1].c}</td>
+      </tr>`).join('');
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// FORM MODAL: TAMBAH KEGIATAN
+// ═════════════════════════════════════════════════════════════════
+
+function openFormModal() {
+  const modal = document.getElementById('formModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    populateFormDataLists();
+    // Restore Nama Penginput from localStorage if available
+    const savedName = localStorage.getItem('dashboardPenginput');
+    if (savedName) {
+      const el = document.getElementById('f-namaPenginput');
+      if (el && !el.value) el.value = savedName;
+    }
+  }
+}
+
+function closeFormModal() {
+  const modal = document.getElementById('formModal');
+  if (modal) modal.style.display = 'none';
+}
+
+// Populate datalists for autocomplete from existing data
+function populateFormDataLists() {
+  if (!DATA) return;
+
+  const fillDatalist = (id, values) => {
+    const dl = document.getElementById(id);
+    if (!dl) return;
+    dl.innerHTML = '';
+    values.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v;
+      dl.appendChild(opt);
+    });
   };
-  const getUniq = field => [...new Set(DATA.kegiatan.map(k=>k[field]).filter(Boolean))].sort();
 
-  addOpts('filterKuartal',       KUARTAL_ORDER);
-  addOpts('filterBulan',         BULAN_ORDER);
-  addOpts('filterSupervisor',    getUniq('supervisor'));
-  addOpts('filterStatus',        getUniq('statusKegiatan'));
-  addOpts('filterBidang',        getUniq('bidang'));
-  addOpts('filterJenisLJK',      getUniq('jenisLJK'));
-  addOpts('filterJenisKegiatan', getUniq('jenisKegiatan'));
-  addOpts('filterKotaKab',       getUniq('kotaKab'));
+  const getUniq = field => [...new Set(DATA.kegiatan.map(k => k[field]).filter(Boolean))].sort();
 
+  fillDatalist('dl-pujk', getUniq('namaPUJK'));
+  fillDatalist('dl-kota', getUniq('kotaKab'));
+
+  // Anggota from all unique names
   const anggotaSet = new Set();
   DATA.kegiatan.forEach(k => {
     if (k.anggota && k.anggota.length > 0) k.anggota.forEach(a => anggotaSet.add(a));
   });
-  addOpts('filterAnggota', [...anggotaSet].sort());
+  fillDatalist('dl-anggota', [...anggotaSet].sort());
 }
 
+async function submitKegiatan(event) {
+  event.preventDefault();
+
+  const btn = document.getElementById('btnSubmitKegiatan');
+  const btnText = document.getElementById('submitBtnText');
+  if (!btn) return;
+
+  btn.disabled = true;
+  const origText = btnText.textContent;
+  btnText.textContent = '⏳ Menyimpan...';
+
+  const payload = {
+    namaKegiatan:   document.getElementById('f-namaKegiatan')?.value || '',
+    namaPUJK:       document.getElementById('f-namaPUJK')?.value || '',
+    kotaKab:        document.getElementById('f-kotaKab')?.value || '',
+    bidang:         document.getElementById('f-bidang')?.value || '',
+    jenisKegiatan:  document.getElementById('f-jenisKegiatan')?.value || '',
+    tanggalMulai:   document.getElementById('f-tanggalMulai')?.value || '',
+    tanggalSelesai: document.getElementById('f-tanggalSelesai')?.value || '',
+    supervisor:     document.getElementById('f-supervisor')?.value || '',
+    statusKegiatan: document.getElementById('f-statusKegiatan')?.value || 'Belum Mulai',
+    anggota1:       document.getElementById('f-anggota1')?.value || '',
+    anggota2:       document.getElementById('f-anggota2')?.value || '',
+    anggota3:       document.getElementById('f-anggota3')?.value || '',
+    anggota4:       document.getElementById('f-anggota4')?.value || '',
+    namaPenginput:  document.getElementById('f-namaPenginput')?.value || '',
+  };
+
+  try {
+    const res = await fetch('/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Gagal menyimpan data');
+    }
+
+    // Save Nama Penginput for next time
+    if (payload.namaPenginput) {
+      localStorage.setItem('dashboardPenginput', payload.namaPenginput);
+    }
+
+    showToast(`✅ ${data.message}`, 'success');
+    closeFormModal();
+    document.getElementById('formKegiatan')?.reset();
+
+    // Restore saved penginput name after reset
+    const savedName = localStorage.getItem('dashboardPenginput');
+    if (savedName) {
+      const el = document.getElementById('f-namaPenginput');
+      if (el) el.value = savedName;
+    }
+
+    // Refresh dashboard data
+    await loadData(true);
+
+  } catch (err) {
+    console.error('Submit error:', err);
+    showToast(`❌ ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btnText.textContent = origText;
+  }
+}
+
+// ─── Toast Notification System ─────────────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  // Animate in
+  requestAnimationFrame(() => toast.classList.add('show'));
+
+  // Auto-remove after 4 seconds
+  setTimeout(() => {
+    toast.classList.remove('show');
+    toast.addEventListener('transitionend', () => toast.remove());
+  }, 4000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ENTRY POINT
+// ═══════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => loadData(false));
+
+// ═════════════════════════════════════════════════════════════════
+// EXPORT & DOWNLOAD
+// ═════════════════════════════════════════════════════════════════
+async function downloadPageImage(pageName) {
+  const el = document.getElementById(`page-${pageName}`);
+  if (!el || typeof html2canvas === 'undefined') {
+    showToast('❌ html2canvas belum dimuat', 'error');
+    return;
+  }
+  showToast('⏳ Menyiapkan gambar...', 'info');
+  try {
+    const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#f8fafc' });
+    const link = document.createElement('a');
+    link.download = `dashboard-${pageName}-${new Date().toISOString().split('T')[0]}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    showToast('✅ Gambar berhasil diunduh', 'success');
+  } catch (e) {
+    console.error(e);
+    showToast('❌ Gagal membuat gambar', 'error');
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KELOLA DATA LOGIC
+// ═════════════════════════════════════════════════════════════════
+let kelolaSortOrder = 1; // 1 = asc, -1 = desc
+
+function toggleKelolaSort() {
+  kelolaSortOrder *= -1;
+  const th = document.getElementById('k-thTanggal');
+  if (th) th.innerHTML = `Tanggal ${kelolaSortOrder === 1 ? '↑' : '↓'}`;
+  updateKelolaData();
+}
+
+function updateKelolaData() {
+  if (!DATA) return;
+  
+  // 1. Get filter values
+  const search        = (document.getElementById('k-search')?.value || '').toLowerCase();
+  const fTahun        = document.getElementById('k-filterTahun')?.value || '';
+  const fBulan        = document.getElementById('k-filterBulan')?.value || '';
+  const fKuartal      = document.getElementById('k-filterKuartal')?.value || '';
+  const fBidang       = document.getElementById('k-filterBidang')?.value || '';
+  const fJenisKegiatan = document.getElementById('k-filterJenisKegiatan')?.value || '';
+  const fSuper        = document.getElementById('k-filterSupervisor')?.value || '';
+  const fStatus       = document.getElementById('k-filterStatus')?.value || '';
+  const fKota         = document.getElementById('k-filterKotaKab')?.value || '';
+  
+  // 2. Filter data
+  let filtered = DATA.kegiatan.filter(k => {
+    if (fTahun        && (!k.tanggalMulai || String(new Date(k.tanggalMulai).getFullYear()) !== fTahun)) return false;
+    if (fBulan        && k.bulan          !== fBulan)           return false;
+    if (fKuartal      && k.kuartal        !== fKuartal)         return false;
+    if (fBidang       && k.bidang         !== fBidang)          return false;
+    if (fJenisKegiatan && k.jenisKegiatan !== fJenisKegiatan)  return false;
+    if (fSuper        && k.supervisor     !== fSuper)           return false;
+    if (fStatus       && k.statusKegiatan !== fStatus)          return false;
+    if (fKota         && k.kotaKab        !== fKota)            return false;
+    
+    if (search) {
+      const nm = (k.namaKegiatan || '').toLowerCase();
+      const p = (k.namaPUJK || '').toLowerCase();
+      if (!nm.includes(search) && !p.includes(search)) return false;
+    }
+    return true;
+  });
+  
+  // 3. Sort by tanggal (default asc)
+  filtered.sort((a, b) => {
+    const da = a.tanggalMulai ? new Date(a.tanggalMulai) : new Date(0);
+    const db = b.tanggalMulai ? new Date(b.tanggalMulai) : new Date(0);
+    return (da - db) * kelolaSortOrder;
+  });
+  
+  // 4. Update UI
+  const cntEl = document.getElementById('k-totalCount');
+  if (cntEl) cntEl.textContent = filtered.length;
+  
+  const tbody = document.getElementById('tbodyKelola');
+  if (!tbody) return;
+  
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:#999;">Data tidak ditemukan</td></tr>`;
+    return;
+  }
+  
+  tbody.innerHTML = filtered.map((k, i) => {
+    // Tgl
+    let tglStr = '—';
+    if (k.tanggalMulai) {
+      const d = new Date(k.tanggalMulai);
+      tglStr = d.toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
+    }
+    
+    // Status color class
+    let sc = 'status-belum';
+    if (k.statusKegiatan === 'Selesai') sc = 'status-selesai';
+    else if (k.statusKegiatan === 'On Progress') sc = 'status-progress';
+    
+    return `<tr>
+      <td>${i + 1}</td>
+      <td title="${escHtml(k.namaKegiatan)}">${truncate(k.namaKegiatan, 40)}</td>
+      <td title="${escHtml(k.namaPUJK)}">${truncate(k.namaPUJK, 25)}</td>
+      <td>${escHtml(k.kotaKab || '—')}</td>
+      <td>${escHtml(k.supervisor || '—')}</td>
+      <td>${tglStr}</td>
+      <td style="padding-right:8px">
+        <select class="status-select ${sc}" onchange="updateStatus(${k.rowNumber}, this.value, this)">
+          <option value="Belum Mulai" ${k.statusKegiatan === 'Belum Mulai' ? 'selected' : ''}>Belum Mulai</option>
+          <option value="On Progress" ${k.statusKegiatan === 'On Progress' ? 'selected' : ''}>On Progress</option>
+          <option value="Selesai" ${k.statusKegiatan === 'Selesai' ? 'selected' : ''}>Selesai</option>
+        </select>
+      </td>
+      <td>
+        <button class="btn-delete-row" title="Hapus Kegiatan" onclick="confirmDelete(${k.rowNumber}, '${escHtml(k.namaKegiatan).replace(/'/g, "\\'")}')">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ═════════════════════════════════════════════════════════════════
+// UBAH STATUS
+// ═════════════════════════════════════════════════════════════════
+async function updateStatus(rowNumber, newStatus, selectEl) {
+  const origClass = selectEl.className;
+  selectEl.disabled = true;
+  showToast('⏳ Menyimpan status...', 'info');
+  
+  try {
+    const res = await fetch('/api/update-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowNumber, statusKegiatan: newStatus })
+    });
+    const resData = await res.json();
+    
+    if (!res.ok) throw new Error(resData.error || 'Gagal mengubah status');
+    
+    showToast('✅ ' + resData.message, 'success');
+    
+    // Refresh to get new row numbers and ensure consistency
+    await loadData(true); 
+  } catch (err) {
+    console.error('Update status error:', err);
+    showToast('❌ ' + err.message, 'error');
+    // Revert class visually
+    selectEl.className = origClass; 
+    selectEl.disabled = false;
+    await loadData(true); // reset
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// HAPUS DATA
+// ═════════════════════════════════════════════════════════════════
+let rowToDelete = null;
+
+function confirmDelete(rowNumber, namaKegiatan) {
+  rowToDelete = rowNumber;
+  const modal = document.getElementById('deleteModal');
+  const nameEl = document.getElementById('deleteModalName');
+  if (modal && nameEl) {
+    nameEl.textContent = namaKegiatan || 'Tanpa Nama';
+    modal.style.display = 'flex';
+  }
+}
+
+function closeDeleteModal() {
+  rowToDelete = null;
+  const modal = document.getElementById('deleteModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function executeDelete() {
+  if (!rowToDelete) return;
+  
+  const btn = document.getElementById('btnConfirmDelete');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Menghapus...';
+  
+  try {
+    const res = await fetch('/api/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowNumber: rowToDelete })
+    });
+    const resData = await res.json();
+    
+    if (!res.ok) throw new Error(resData.error || 'Gagal menghapus data');
+    
+    showToast('✅ ' + resData.message, 'success');
+    closeDeleteModal();
+    
+    // Refresh data! This is critical so rowNumbers are re-calculated
+    await loadData(true);
+  } catch (err) {
+    console.error('Delete error:', err);
+    showToast('❌ ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+}
